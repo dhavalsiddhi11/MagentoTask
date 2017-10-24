@@ -18,16 +18,15 @@ use SIS\Threshold\Model\Cart;
 /**
  * @SuppressWarnings(PHPMD.CouplingBetweenObjects)
  */
+/**
+ * @SuppressWarnings(PHPMD.CouplingBetweenObjects)
+ */
 class Add extends \Magento\Checkout\Controller\Cart
 {
     /**
      * @var ProductRepositoryInterface
      */
     protected $productRepository;
-	/**
-     * @var \Magento\CatalogInventory\Api\StockRegistryInterface
-     */
-    protected $stockRegistry;
 
     /**
      * @param \Magento\Framework\App\Action\Context $context
@@ -46,11 +45,6 @@ class Add extends \Magento\Checkout\Controller\Cart
         \Magento\Store\Model\StoreManagerInterface $storeManager,
         \Magento\Framework\Data\Form\FormKey\Validator $formKeyValidator,
         CustomerCart $cart,
-        CartManagementInterface $quoteManagement,
-        \Magento\CatalogInventory\Api\StockRegistryInterface $stockRegistry,
-        QuoteIdMaskFactory $quoteIdMaskFactory,
-        CartRepositoryInterface $cartRepository,
-        \SIS\Threshold\Model\Cart $cmodel,
         ProductRepositoryInterface $productRepository
     ) {
         parent::__construct(
@@ -59,22 +53,11 @@ class Add extends \Magento\Checkout\Controller\Cart
             $checkoutSession,
             $storeManager,
             $formKeyValidator,
-            $cart,
-            $quoteManagement,
-            $quoteIdMaskFactory,
-            $cartRepository,
-            $stockRegistry,
-            $cmodel,
-            $productRepository
+            $cart
         );
         $this->productRepository = $productRepository;
-		$this->quoteManagement = $quoteManagement;
-        $this->quoteIdMaskFactory = $quoteIdMaskFactory;
-		$this->stockRegistry = $stockRegistry;
-        $this->cartRepository = $cartRepository;
-		$this->cmodel = $cmodel;
-		
     }
+
     /**
      * Initialize product instance from request data
      *
@@ -84,7 +67,9 @@ class Add extends \Magento\Checkout\Controller\Cart
     {
         $productId = (int)$this->getRequest()->getParam('product');
         if ($productId) {
-            $storeId = $this->_objectManager->get('Magento\Store\Model\StoreManagerInterface')->getStore()->getId();
+            $storeId = $this->_objectManager->get(
+                \Magento\Store\Model\StoreManagerInterface::class
+            )->getStore()->getId();
             try {
                 return $this->productRepository->getById($productId, false, $storeId);
             } catch (NoSuchEntityException $e) {
@@ -93,6 +78,7 @@ class Add extends \Magento\Checkout\Controller\Cart
         }
         return false;
     }
+
     /**
      * Add product to shopping cart action
      *
@@ -101,40 +87,52 @@ class Add extends \Magento\Checkout\Controller\Cart
      */
     public function execute()
     {
-    	//CHECK THRESHOLD HERE
-    	echo "We are working on Qty Threshold set feature.";
-    	exit;
-    	//    		
+    	
+		
         if (!$this->_formKeyValidator->validate($this->getRequest())) {
             return $this->resultRedirectFactory->create()->setPath('*/*/');
         }
 
         $params = $this->getRequest()->getParams();
+
         try {
             if (isset($params['qty'])) {
                 $filter = new \Zend_Filter_LocalizedToNormalized(
-                    ['locale' => $this->_objectManager->get('Magento\Framework\Locale\ResolverInterface')->getLocale()]
+                    ['locale' => $this->_objectManager->get(
+                        \Magento\Framework\Locale\ResolverInterface::class
+                    )->getLocale()]
                 );
                 $params['qty'] = $filter->filter($params['qty']);
             }
 
             $product = $this->_initProduct();
             $related = $this->getRequest()->getParam('related_product');
-
+			//CHECK THRESHOLD START
+			if (null !== $product->getCustomAttribute('quantity_threshold')) {
+				   $qt=$product->getCustomAttribute('quantity_threshold')->getValue();
+				   if($qt && ($params['qty'] > $qt))
+				   {				   					   							
+						$this->messageManager->addException($e, __('We can\'t add '.$product->getName().' to your shopping cart right now.You can only add maximum '.$qt.' for it.'));
+			            $this->_objectManager->get(\Psr\Log\LoggerInterface::class)->critical($e);
+			            return $this->goBack();
+						
+				  }			  
+			}
+			//CHECK THRESHOLD END
             /**
              * Check product availability
              */
             if (!$product) {
                 return $this->goBack();
             }
-						
-            $this->cmodel->addProduct($product, $params);
-			
+
+            $this->cart->addProduct($product, $params);
             if (!empty($related)) {
-                $this->cmodel->addProductsByIds(explode(',', $related));
+                $this->cart->addProductsByIds(explode(',', $related));
             }
 
-            $this->cmodel->save();
+            $this->cart->save();
+
             /**
              * @todo remove wishlist observer \Magento\Wishlist\Observer\AddToCart
              */
@@ -144,7 +142,7 @@ class Add extends \Magento\Checkout\Controller\Cart
             );
 
             if (!$this->_checkoutSession->getNoCartRedirect(true)) {
-                if (!$this->cmodel->getQuote()->getHasError()) {
+                if (!$this->cart->getQuote()->getHasError()) {
                     $message = __(
                         'You added %1 to your shopping cart.',
                         $product->getName()
@@ -156,13 +154,13 @@ class Add extends \Magento\Checkout\Controller\Cart
         } catch (\Magento\Framework\Exception\LocalizedException $e) {
             if ($this->_checkoutSession->getUseNotice(true)) {
                 $this->messageManager->addNotice(
-                    $this->_objectManager->get('Magento\Framework\Escaper')->escapeHtml($e->getMessage())
+                    $this->_objectManager->get(\Magento\Framework\Escaper::class)->escapeHtml($e->getMessage())
                 );
             } else {
                 $messages = array_unique(explode("\n", $e->getMessage()));
                 foreach ($messages as $message) {
                     $this->messageManager->addError(
-                        $this->_objectManager->get('Magento\Framework\Escaper')->escapeHtml($message)
+                        $this->_objectManager->get(\Magento\Framework\Escaper::class)->escapeHtml($message)
                     );
                 }
             }
@@ -170,70 +168,18 @@ class Add extends \Magento\Checkout\Controller\Cart
             $url = $this->_checkoutSession->getRedirectUrl(true);
 
             if (!$url) {
-                $cartUrl = $this->_objectManager->get('Magento\Checkout\Helper\Cart')->getCartUrl();
+                $cartUrl = $this->_objectManager->get(\Magento\Checkout\Helper\Cart::class)->getCartUrl();
                 $url = $this->_redirect->getRedirectUrl($cartUrl);
             }
 
             return $this->goBack($url);
-
         } catch (\Exception $e) {
-			
-			
             $this->messageManager->addException($e, __('We can\'t add this item to your shopping cart right now.'));
-            $this->_objectManager->get('Psr\Log\LoggerInterface')->critical($e);
+            $this->_objectManager->get(\Psr\Log\LoggerInterface::class)->critical($e);
             return $this->goBack();
         }
     }
-   
-	 protected function _getProductRequest($requestInfo)
-    {
-        if ($requestInfo instanceof \Magento\Framework\DataObject) {
-            $request = $requestInfo;
-        } elseif (is_numeric($requestInfo)) {
-            $request = new \Magento\Framework\DataObject(['qty' => $requestInfo]);
-        } elseif (is_array($requestInfo)) {
-            $request = new \Magento\Framework\DataObject($requestInfo);
-        } else {
-            throw new \Magento\Framework\Exception\LocalizedException(
-                __('We found an invalid request for adding product to quote.')
-            );
-        }
-        $this->getRequestInfoFilter()->filter($request);
 
-        return $request;
-    }
-	private function getRequestInfoFilter()
-    {
-        if ($this->requestInfoFilter === null) {
-            $this->requestInfoFilter = \Magento\Framework\App\ObjectManager::getInstance()
-                ->get(\Magento\Checkout\Model\Cart\RequestInfoFilterInterface::class);
-        }
-        return $this->requestInfoFilter;
-    }
-	protected function _getProduct($productInfo)
-    {
-        $product = null;
-        if ($productInfo instanceof Product) {
-            $product = $productInfo;
-            if (!$product->getId()) {
-                throw new \Magento\Framework\Exception\LocalizedException(__('We can\'t find the product.'));
-            }
-        } elseif (is_int($productInfo) || is_string($productInfo)) {
-            $storeId = $this->_storeManager->getStore()->getId();
-            try {
-                $product = $this->productRepository->getById($productInfo, false, $storeId);
-            } catch (NoSuchEntityException $e) {
-                throw new \Magento\Framework\Exception\LocalizedException(__('We can\'t find the product.'), $e);
-            }
-        } else {
-            throw new \Magento\Framework\Exception\LocalizedException(__('We can\'t find the product.'));
-        }
-        $currentWebsiteId = $this->_storeManager->getStore()->getWebsiteId();
-        if (!is_array($product->getWebsiteIds()) || !in_array($currentWebsiteId, $product->getWebsiteIds())) {
-            throw new \Magento\Framework\Exception\LocalizedException(__('We can\'t find the product.'));
-        }
-        return $product;
-    }
     /**
      * Resolve response
      *
@@ -260,7 +206,7 @@ class Add extends \Magento\Checkout\Controller\Cart
         }
 
         $this->getResponse()->representJson(
-            $this->_objectManager->get('Magento\Framework\Json\Helper\Data')->jsonEncode($result)
+            $this->_objectManager->get(\Magento\Framework\Json\Helper\Data::class)->jsonEncode($result)
         );
     }
 }

@@ -79,6 +79,7 @@ class Add extends \Magento\Checkout\Controller\Cart
      */
     public function execute()
     {
+    	
         if (!$this->_formKeyValidator->validate($this->getRequest())) {
             return $this->resultRedirectFactory->create()->setPath('*/*/');
         }
@@ -153,6 +154,7 @@ class Add extends \Magento\Checkout\Controller\Cart
 
             return $this->goBack($url);
         } catch (\Exception $e) {
+        	echo $e->getMessage();exit;
             $this->messageManager->addException($e, __('We can\'t add this item to your shopping cart right now.'));
             $this->_objectManager->get(\Psr\Log\LoggerInterface::class)->critical($e);
             return $this->goBack();
